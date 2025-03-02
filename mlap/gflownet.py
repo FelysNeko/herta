@@ -15,10 +15,10 @@ from envs.word import Env
 @dataclass
 class Config:
     seed = 42
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     hidden_dim: int = 512
     num_epochs: int = 500
-    update_freq: int = 10
+    update_freq: int = 20
 
 
 class Proxy:

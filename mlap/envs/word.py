@@ -24,7 +24,10 @@ class Env:
         counter = np.zeros(26)
         for c in self.word[:self.cursor]:
             counter[int(c - 1)] += 1
-        return max(counter)
+        if (r := counter.max()) <= self.cap / 2:
+            return r
+        else:
+            return self.cap - r
 
     def mask(self):
         backward = [0] + [1] * 26
