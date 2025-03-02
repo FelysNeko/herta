@@ -17,8 +17,8 @@ class Config:
     seed = 42
     learning_rate: float = 1e-4
     hidden_dim: int = 512
-    num_epochs: int = 500
-    update_freq: int = 20
+    num_epochs: int = 1000
+    update_freq: int = 10
 
 
 class Proxy:
@@ -76,11 +76,10 @@ def train(config: Config) -> Agent:
     agent = Agent(proxy, config)
     optimizer = Adam(agent.parameters(), lr=config.learning_rate)
 
-    batch_loss = torch.zeros(1)
-
+    losses = []
     for episode in range(config.num_epochs * config.update_freq):
-        sum_log_p_f = torch.zeros(1)
-        sum_log_p_b = torch.zeros(1)
+        log_p_f = []
+        log_p_b = []
 
         state = proxy.reset()
         f_logits, b_logits = agent(state)
@@ -89,21 +88,23 @@ def train(config: Config) -> Agent:
         while not done:
             cat = Categorical(logits=f_logits)
             action = cat.sample()
-            sum_log_p_f += cat.log_prob(action)
+            log_p_f += [cat.log_prob(action)]
 
             state, done = proxy.step(action)
             f_logits, b_logits = agent(state)
-            sum_log_p_b += Categorical(logits=b_logits).log_prob(action)
+            log_p_b += [Categorical(logits=b_logits).log_prob(action)]
 
         log_r = torch.log(proxy.reward()).clip(-20)
+        sum_log_p_f = torch.stack(log_p_f).sum()
+        sum_log_p_b = torch.stack(log_p_b).sum()
         loss = (agent.log_z + sum_log_p_f - log_r - sum_log_p_b).pow(2)
-        batch_loss += loss
+        losses.append(loss)
 
         if episode % config.update_freq == 0:
             optimizer.zero_grad()
-            batch_loss.backward()
+            torch.stack(losses).sum().backward()
             optimizer.step()
-            batch_loss = torch.zeros(1)
+            losses.clear()
 
     return agent
 
