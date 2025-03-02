@@ -21,12 +21,17 @@ class Env:
         return self.word
 
     def reward(self):
-        if self.cursor == 0:
-            return 0
-        counter = [0] * 26
+        counter = np.zeros(26)
         for c in self.word[:self.cursor]:
             counter[int(c - 1)] += 1
-        return r if (r := max(counter)) <= 10 else 0
+        return max(counter)
+
+    def mask(self):
+        backward = [0] + [1] * 26
+        if self.cursor == self.cap:
+            return [1] + [0] * 26, backward
+        else:
+            return [1] * 27, backward
 
     def render(self):
         chars = self.word[:self.cursor]
