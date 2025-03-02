@@ -1,6 +1,5 @@
-import torch.nn as nn
 import torch
-
+import torch.nn as nn
 from torch.distributions import Categorical
 from torch.optim import Adam
 
@@ -22,7 +21,7 @@ class Proxy:
 
     def reward(self):
         return torch.tensor(self.env.reward()).float()
-    
+
     def render(self):
         self.env.render()
 
@@ -30,33 +29,30 @@ class Proxy:
 class Agent(nn.Module):
     def __init__(self, state_dim, hidden_dim, num_actions) -> None:
         super().__init__()
+        self.num_actions = num_actions
         self.log_z = nn.Parameter(torch.ones(1))
-        self.forward_policy = nn.Sequential(
+        self.mlp = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
-            nn.LeakyReLU(),
-            nn.Linear(hidden_dim, num_actions),
-        )
-        self.backward_policy = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.LeakyReLU(),
-            nn.Linear(hidden_dim, num_actions),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, num_actions * 2)
         )
 
     def forward(self, s):
-        f_logits = self.forward_policy(s)
-        b_logits = self.backward_policy(s)
+        logits = self.mlp(s)
+        f_logits = logits[:self.num_actions]
+        b_logits = logits[self.num_actions:]
         return f_logits, b_logits
 
 
 def train():
     proxy = Proxy()
-    agent = Agent(proxy.state_dim, 64, proxy.num_actions)
+    agent = Agent(proxy.state_dim, 512, proxy.num_actions)
     optimizer = Adam(agent.parameters(), lr=3e-4)
 
-    for episode in range(20000):
+    for episode in range(10000):
         sum_log_p_f = 0
         sum_log_p_b = 0
-        
+
         state = proxy.reset()
         f_logits, b_logits = agent(state)
         done = False
@@ -65,12 +61,10 @@ def train():
             cat = Categorical(logits=f_logits)
             action = cat.sample()
             sum_log_p_f += cat.log_prob(action)
-           
-            next_state, done = proxy.step(action)
-            f_logits, b_logits = agent(next_state)
-            sum_log_p_b += Categorical(logits=b_logits).log_prob(action)
 
-            state = next_state
+            state, done = proxy.step(action)
+            f_logits, b_logits = agent(state)
+            sum_log_p_b += Categorical(logits=b_logits).log_prob(action)
 
         reward = torch.log(proxy.reward()).clip(-20)
         loss = (agent.log_z + sum_log_p_f - reward - sum_log_p_b).pow(2)
@@ -78,6 +72,7 @@ def train():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        
+
+
 if __name__ == '__main__':
     train()
