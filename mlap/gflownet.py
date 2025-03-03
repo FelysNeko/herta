@@ -1,6 +1,5 @@
 import random
 from dataclasses import dataclass
-from typing import Tuple
 
 import numpy as np
 import torch
@@ -15,49 +14,33 @@ from torch.optim import Adam
 class Config:
     seed = 0
     learning_rate: float = 1e-4
-    hidden_dim: int = 512
-    num_epochs: int = 10000
-    batch_size: int = 100
+    hidden_dim: int = 256
+    num_epochs: int = 2000
+    batch_size: int = 50
 
-    state_dim: int = 27 * 10
-    num_actions: int = 27
+    state_dim: int = 11 * 10
+    num_actions: int = 10
 
 
 def reset(config: Config) -> Tensor:
     state = torch.zeros(config.batch_size, 10).long()
-    state = one_hot(state, 27).view(config.batch_size, -1)
+    state = one_hot(state, 11).view(config.batch_size, -1)
     return state.float()
 
 
-def step(s: Tensor, actions: Tensor) -> Tuple[Tensor, Tensor]:
-    s = s.view(s.shape[0], -1, 27).argmax(dim=2)
-    idx = s.argmin(dim=1)
-    t = ~(s[:, -1] != 0) & actions.bool()
-    s[t, idx[t]] = actions[t]
-    dones = s[:, -1] != 0
-    s = one_hot(s, 27).view(s.shape[0], -1)
-    return s.float(), dones | ~actions.bool()
-
-
-def mask(s: Tensor) -> Tuple[Tensor, Tensor]:
-    s = s.view(s.shape[0], -1, 27).argmax(dim=2)
-    t = s[:, -1] != 0
-    f = torch.ones(s.shape[0], 27)
-    f[t, 1:] = 0
-    b = torch.ones(s.shape[0], 27)
-    b[:, 0] = 0
-    return f.bool(), b.bool()
+def step(s: Tensor, actions: Tensor) -> Tensor:
+    s = s.view(s.shape[0], -1, 11).argmax(dim=2)
+    index = s[0].argmin()
+    s[:, index] = actions + 1
+    s = one_hot(s, 11).view(s.shape[0], -1)
+    return s.float()
 
 
 def proxy(s: Tensor) -> Tensor:
-    s = s.view(s.shape[0], -1, 27).argmax(dim=2)
+    s = s.view(s.shape[0], -1, 11).argmax(dim=2)
     x = s.sum(dim=1)
     reward = torch.zeros(s.shape[0])
-    reward[x >= 210] = 5
-    reward[x >= 220] = 6
-    reward[x >= 230] = 7
-    reward[x >= 240] = 8
-    reward[x >= 250] = 9
+    reward[(50 <= x) & (x <= 60)] = 1
     return reward
 
 
@@ -75,11 +58,19 @@ class Agent(nn.Module):
         self.backward_policy = nn.Linear(hidden_dim, num_actions)
 
     def forward(self, s):
-        f_mask, b_mask = mask(s)
         x = self.trunk(s)
-        f_logits = self.forward_policy(x) * f_mask + ~f_mask * -100
-        b_logits = self.backward_policy(x) * b_mask + ~b_mask * -100
+        f_logits = self.forward_policy(x)
+        b_logits = self.backward_policy(x)
         return f_logits, b_logits
+
+    def sample(self):
+        states = reset(configuration)
+        for _ in range(10):
+            logits, _ = self(states)
+            actions = Categorical(logits=logits).sample()
+            states = step(states, actions)
+        states = states.view(states.shape[0], -1, 11).argmax(dim=2)
+        return states
 
 
 def train(config: Config) -> Agent:
@@ -90,37 +81,33 @@ def train(config: Config) -> Agent:
     agent = Agent(config.state_dim, config.hidden_dim, config.num_actions)
     optimizer = Adam(agent.parameters(), lr=config.learning_rate)
 
-    for epoch in range(config.num_epochs):
+    for epoch in range(1, config.num_epochs + 1):
         states = reset(config)
-        dones = torch.zeros(config.batch_size).bool()
         sum_log_prob_f = torch.zeros(config.batch_size)
         sum_log_prob_b = torch.zeros(config.batch_size)
 
-        while not dones.all():
-            f_logits, _ = agent(states[~dones])
+        f_logits, b_logits = agent(states)
+        for _ in range(10):
             cat = Categorical(logits=f_logits)
-            action = cat.sample()
+            actions = cat.sample()
+            states = step(states, actions)
 
-            states[~dones], next_dones = step(states[~dones], action)
-            _, b_logits = agent(states[~dones])
-
-            sum_log_prob_f[~dones] += cat.log_prob(action)
-            sum_log_prob_b[~dones] += Categorical(logits=b_logits).log_prob(action)
-
-            dones[~dones] = next_dones
+            f_logits, b_logits = agent(states)
+            sum_log_prob_f += cat.log_prob(actions)
+            sum_log_prob_b += Categorical(logits=b_logits).log_prob(actions)
 
         log_r = torch.log(proxy(states)).clip(-20)
         loss = (agent.log_z + sum_log_prob_f - log_r - sum_log_prob_b).pow(2)
 
         optimizer.zero_grad()
-        loss.mean().backward()
+        loss.sum().backward()
         optimizer.step()
 
-        if epoch % 500 == 0:
+        if epoch % 200 == 0:
             print(
                 f'{epoch:<7}',
                 f'{loss.mean().item():<13.3f}',
-                f'{agent.log_z.exp().item():<13.6f}',
+                f'{agent.log_z.exp().item():<7.3f}',
                 *proxy(states).unique(return_counts=True)
             )
 
@@ -129,4 +116,5 @@ def train(config: Config) -> Agent:
 
 if __name__ == '__main__':
     configuration = Config()
-    _ = train(configuration)
+    samples = train(configuration).sample()
+    print(samples.numpy())
