@@ -15,9 +15,9 @@ from torch.optim import Adam
 class Config:
     seed = 0
     learning_rate: float = 1e-4
-    hidden_dim: int = 1024
-    num_epochs: int = 1000
-    batch_size: int = 1000
+    hidden_dim: int = 512
+    num_epochs: int = 10000
+    batch_size: int = 100
 
     state_dim: int = 27 * 10
     num_actions: int = 27
@@ -64,19 +64,21 @@ def proxy(s: Tensor) -> Tensor:
 class Agent(nn.Module):
     def __init__(self, state_dim, hidden_dim, num_actions) -> None:
         super().__init__()
-        self.num_actions = num_actions
-        self.log_z = nn.Parameter(torch.ones(1))
-        self.mlp = nn.Sequential(
+        self.log_z = nn.Parameter(torch.zeros(1))
+        self.trunk = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
-            nn.LeakyReLU(),
-            nn.Linear(hidden_dim, num_actions * 2)
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
         )
+        self.forward_policy = nn.Linear(hidden_dim, num_actions)
+        self.backward_policy = nn.Linear(hidden_dim, num_actions)
 
     def forward(self, s):
-        logits = self.mlp(s)
-        f_m, b_m = mask(s)
-        f_logits = logits[:, :self.num_actions] * f_m + ~f_m * -100
-        b_logits = logits[:, self.num_actions:] * b_m + ~b_m * -100
+        f_mask, b_mask = mask(s)
+        x = self.trunk(s)
+        f_logits = self.forward_policy(x) * f_mask + ~f_mask * -100
+        b_logits = self.backward_policy(x) * b_mask + ~b_mask * -100
         return f_logits, b_logits
 
 
@@ -111,13 +113,13 @@ def train(config: Config) -> Agent:
         loss = (agent.log_z + sum_log_prob_f - log_r - sum_log_prob_b).pow(2)
 
         optimizer.zero_grad()
-        loss.sum().backward()
+        loss.mean().backward()
         optimizer.step()
 
-        if epoch % 100 == 0:
+        if epoch % 500 == 0:
             print(
                 f'{epoch:<7}',
-                f'{loss.sum().item():<13.3f}',
+                f'{loss.mean().item():<13.3f}',
                 f'{agent.log_z.exp().item():<13.6f}',
                 *proxy(states).unique(return_counts=True)
             )
