@@ -22,9 +22,9 @@ class Config:
     num_actions: int = 10
 
 
-def reset(config: Config) -> Tensor:
-    state = torch.zeros(config.batch_size, 10).long()
-    state = one_hot(state, 11).view(config.batch_size, -1)
+def reset(batch_size: int) -> Tensor:
+    state = torch.zeros(batch_size, 10).long()
+    state = one_hot(state, 11).view(batch_size, -1)
     return state.float()
 
 
@@ -63,8 +63,8 @@ class Agent(nn.Module):
         b_logits = self.backward_policy(x)
         return f_logits, b_logits
 
-    def sample(self):
-        states = reset(configuration)
+    def sample(self, batch_size: int):
+        states = reset(batch_size)
         for _ in range(10):
             logits, _ = self(states)
             actions = Categorical(logits=logits).sample()
@@ -82,7 +82,7 @@ def train(config: Config) -> Agent:
     optimizer = Adam(agent.parameters(), lr=config.learning_rate)
 
     for epoch in range(1, config.num_epochs + 1):
-        states = reset(config)
+        states = reset(config.batch_size)
         sum_log_prob_f = torch.zeros(config.batch_size)
         sum_log_prob_b = torch.zeros(config.batch_size)
 
@@ -116,5 +116,5 @@ def train(config: Config) -> Agent:
 
 if __name__ == '__main__':
     configuration = Config()
-    samples = train(configuration).sample()
-    print(samples.numpy())
+    samples = train(configuration).sample(10).numpy()
+    print(samples)
