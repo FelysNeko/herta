@@ -40,7 +40,7 @@ def proxy(s: Tensor) -> Tensor:
     s = s.view(s.shape[0], -1, 11).argmax(dim=2)
     x = s.sum(dim=1)
     reward = torch.zeros(s.shape[0])
-    reward[(50 <= x) & (x <= 60)] = 1
+    reward[(20 <= x) & (x <= 30)] = 1
     return reward
 
 
@@ -100,14 +100,14 @@ def train(config: Config) -> Agent:
         loss = (agent.log_z + sum_log_prob_f - log_r - sum_log_prob_b).pow(2)
 
         optimizer.zero_grad()
-        loss.sum().backward()
+        loss.mean().backward()
         optimizer.step()
 
         if epoch % 200 == 0:
             print(
-                f'{epoch:<7}',
-                f'{loss.mean().item():<13.3f}',
-                f'{agent.log_z.exp().item():<7.3f}',
+                f'{epoch:<11}',
+                f'{loss.mean().item():<11.3f}',
+                f'{agent.log_z.exp().item():<11.3f}',
                 *proxy(states).unique(return_counts=True)
             )
 
